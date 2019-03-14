@@ -109,7 +109,7 @@ def train(start_epoch, epochs, model, train_set, val_set):
 
             input = Variable(input, requires_grad=True)
             target = Variable(target)
-            loss =
+            loss = None
             output, featureMaps = model(input, target)
 
 
@@ -172,4 +172,5 @@ def read_train_data(datadir, data, mode):
 
 
 if __name__ =='__main__':
+    print('begin')
     main()

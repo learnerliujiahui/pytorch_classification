@@ -2,6 +2,7 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
+      <module fileurl="file://$PROJECT_DIR$/../CondenseNet/.idea/CondenseNet.iml" filepath="$PROJECT_DIR$/../CondenseNet/.idea/CondenseNet.iml" />
       <module fileurl="file://$PROJECT_DIR$/.idea/pytorch_classification.iml" filepath="$PROJECT_DIR$/.idea/pytorch_classification.iml" />
     </modules>
   </component>
