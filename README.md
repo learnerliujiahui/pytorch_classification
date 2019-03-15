@@ -1,0 +1,3 @@
+# pytorch_classification
+This project is only for the research purpose, and the core model is the original code from CondenseNet.
+The projects is updating now...
