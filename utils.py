@@ -4,7 +4,9 @@ import torch
 import operator
 from functools import reduce
 from torch.autograd import Variable
+from torch.utils.data import Subset
 from torchvision import datasets, transforms
+
 
 class AverageMeter(object):
     """
@@ -27,7 +29,9 @@ class AverageMeter(object):
         self.avg = self.sum / self.count
 
 
-def read_train_data(datadir, data, mode):
+def read_train_data(datadir, data):
+    val_size = 5000
+    test_size = 1000
     data_dir = os.path.join(datadir, data)
     if data == 'cifar10':
         image_size = 32
@@ -41,6 +45,11 @@ def read_train_data(datadir, data, mode):
         val_set = datasets.CIFAR10(data_dir, train=False, transform=transforms.Compose([
                                                                                     transforms.ToTensor(),
                                                                                     transforms.Normalize(mean=mean, std=std)]))
+        indices = torch.randperm(len(train_set))
+        train_indices = indices[:len(indices) - val_size]
+        valid_indices = indices[len(indices) - val_size:]
+        train_set = Subset(train_set, train_indices)
+        val_set = Subset(val_set, valid_indices)
     elif data == 'cifar100':
         image_size = 32
         mean=[0.5071, 0.4867, 0.4408]
@@ -73,6 +82,33 @@ def read_train_data(datadir, data, mode):
         raise NotImplementedError
 
     return train_set, val_set
+
+
+def read_test_data(datadir, data, mode):
+    data_dir = os.path.join(datadir, data)
+    if data == 'cifar10':
+        image_size = 32
+        mean=[0.4914, 0.4824, 0.4467]
+        std=[0.2471, 0.2435, 0.2616]
+        test_transforms = transforms.Compose([transforms.ToTensor(),
+                                              transforms.Normalize(mean=mean, std=std),
+                                            ])
+        test_set = datasets.CIFAR10(data_dir, train=False, transform=test_transforms, download=False)
+    elif data == 'cifar100':
+        mean = [0.5071, 0.4867, 0.4408]
+        std = [0.2675, 0.2565, 0.2761]
+        test_transforms = transforms.Compose([transforms.ToTensor(),
+                                              transforms.Normalize(mean=mean, std=std),
+                                              ])
+        test_set = datasets.CIFAR10(data_dir, train=False, transform=test_transforms, download=False)
+
+    elif data == 'imagenet':
+        pass
+
+    else:
+        raise NotImplementedError
+    return test_set
+
 
 
 def adjust_learning_rate(optimizer, epoch, args, batch=None, nBatch=None, method='cosine'):

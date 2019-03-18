@@ -8,28 +8,28 @@ import time
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torchvision import datasets, transforms
 from torch.autograd import Variable
 from torch.utils.data import DataLoader
+from tensorboardX import SummaryWriter
 import matplotlib.pyplot as plt
 import models
 from models import densenet, condensenet
-from utils import AverageMeter, read_train_data, adjust_learning_rate, load_checkpoint, accuracy, measure_model
-
+from utils import AverageMeter, read_train_data, read_test_data, adjust_learning_rate, \
+    load_checkpoint, accuracy, measure_model
 
 # version pytorch 1.0
 
 '''
 set the data dir and saving dir 
 '''
-
 parser = argparse.ArgumentParser(description='Model Parameters')
 parser.add_argument('--mode', default='train', choices=['train', 'test'])  # train/test
 parser.add_argument('--featureVisualize', default=True)
 parser.add_argument('--data', default='cifar10', choices=['cifar10', 'cifar100', 'imagenet'])
 parser.add_argument('--data_dir', default='/home/liujiahui/data_zoo/')  # + cifar10/cifar100/...
-parser.add_argument('--save_dir', default='/home/liujiahui/PycharmProjects/efficient_densenet_pytorch/log0315')
-parser.add_argument('--para_dir', default='/home/liujiahui/PycharmProjects/efficient_densenet_pytorch/log0309')
+parser.add_argument('--save_dir', default='/home/liujiahui/PycharmProjects/efficient_densenet_pytorch/0315/model')
+parser.add_argument('--log_dir', default='/home/liujiahui/PycharmProjects/efficient_densenet_pytorch/0315/log')
+parser.add_argument('--para_dir', default='/home/liujiahui/PycharmProjects/efficient_densenet_pytorch/0315/para')
 parser.add_argument('--gpu', default='0')
 parser.add_argument('--workers', default=8, type=int, metavar='N', help='number of data loading workers (default: 4)')
 parser.add_argument('--print-freq', default=10, type=int, metavar='N', help='print frequency (default: 10)')
@@ -99,8 +99,8 @@ def main():
 
     if args.mode == 'train':
         # get the training loader and validation loader
-        train_set, val_set = read_train_data(datadir=args.data_dir, data=args.data, mode='train')
-        test_set = read_test_set()
+        train_set, val_set = read_train_data(datadir=args.data_dir, data=args.data)
+
         # set the start epoch value
         if args.resume:
             start_epoch = None
@@ -110,7 +110,8 @@ def main():
         train(startepoch=start_epoch, epochs=args.epochs, model=model, train_set=train_set,
               val_set=val_set, resume=args.resume)
 
-    elif args.mode =='test':
+    elif args.mode == 'test':
+        test_set = read_test_data(datadir=args.data_dir, data=args.data, mode='test')
         test(model=model, )
     else:
         raise NotImplementedError
@@ -135,92 +136,118 @@ def train(startepoch, epochs, model, train_set, val_set, resume):
             optimizer.load_state_dict(checkpoint['optimizer'])
     else:
         start_epoch = startepoch
+        Writer = SummaryWriter(log_dir=args.log_dir)
+
+    # set a variable for tensorboard
+    training_total_loss = 0
 
     # starting training
     for epoch in range(start_epoch, epochs):
-        batch_time = AverageMeter()
-        data_time = AverageMeter()
-        losses = AverageMeter()
-        top1 = AverageMeter()
-        top5 = AverageMeter()
-        learned_module_list = []  # add all the LGC layers into the list
+        # start training
+        tr_error1, tr_error5, loss, lr, training_total_loss = train_eopch(train_loader, model, optimizer, criterion,
+                                                                        epoch, epochs, training_total_loss)
 
-        # Switch to train mode
-        model.train()
-        # Find all learned convs to prepare for group lasso loss
-        for m in model.modules():
-            if m.__str__().startswith('LearnedGroupConv'):
-                learned_module_list.append(m)
+        # record the training information into ckpt file --> TensorboardX
+        Writer.add_scalar("training total loss", training_total_loss, epoch)
+        Writer.add_scalar("training top-1 error", tr_error1, epoch)
+        Writer.add_scalar("training top-5 error", tr_error5, epoch)
+        Writer.add_scalar("learning rate", lr, epoch)
 
-        running_lr = None
+        print("the total loss of epoch {}, is: {}".format(epoch, training_total_loss))
+        training_total_loss = 0
 
-        beginTime = time.time()
-        for i, (input, target) in enumerate(train_loader):
-            progress = float(epoch * len(train_loader) + i) / (epochs * len(train_loader))
-            args.progress = progress
-
-            lr = adjust_learning_rate(optimizer, epoch, args, batch=i, nBatch=len(train_loader), method=args.lr_type)
-            if running_lr is None:
-                running_lr = lr
-
-            data_time.update(time.time() - beginTime)
-
-            # input Tensor CPU --> GPU
-            if torch.cuda.is_available():
-                input = input.cuda()
-                target = target.cuda()
-
-            # Tensor --> Variable --> model
-            inputVar = Variable(input, requires_grad=True)
-            targetVar = Variable(target)
-
-            # compute the result
-            output, featureMaps = model(inputVar, progress)
-            loss = criterion(output, targetVar)
-
-            # Add group lasso loss to the basic loss value
-            if args.group_lasso_lambda > 0:
-                lasso_loss = 0
-                for m in learned_module_list:
-                    lasso_loss = lasso_loss + m.lasso_loss
-                loss = loss + args.group_lasso_lambda * lasso_loss
-
-            # Measure accuracy and record loss
-            prec1, prec5 = accuracy(output.data, target, topk=(1, 5))
-            losses.update(loss.data[0], input.size(0))
-            top1.update(prec1[0], input.size(0))
-            top5.update(prec5[0], input.size(0))
-
-            # Compute gradient and do SGD step
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-
-            batch_time.update(time.time() - beginTime)
-            end = time.time()
-
-            if i % args.print_freq == 0:
-                print('Epoch: [{0}][{1}/{2}]\t'
-                      'Time {batch_time.val:.3f}\t'  # ({batch_time.avg:.3f}) '
-                      'Data {data_time.val:.3f}\t'  # ({data_time.avg:.3f}) '
-                      'Loss {loss.val:.4f}\t'  # ({loss.avg:.4f}) '
-                      'Prec@1 {top1.val:.3f}\t'  # ({top1.avg:.3f}) '
-                      'Prec@5 {top5.val:.3f}\t'  # ({top5.avg:.3f})'
-                      'lr {lr: .4f}'.format(epoch, i, len(train_loader), batch_time=batch_time,
-                                            data_time=data_time, loss=losses, top1=top1, top5=top5, lr=lr))
+        # start validation
+        val_error1, val_error5, loss, losses = val_epoch(val_loader, model)
+        Writer.add_scalar("validation total loss", losses, epoch)
+        Writer.add_scalar("validation top-1 error", val_error1, epoch)
+        Writer.add_scalar("validation top-5 error", val_error5, epoch)
 
 
-def test(model, val_loader):
+def train_eopch(train_loader, model, optimizer, criterion, epoch, epochs, total_loss):
     batch_time = AverageMeter()
+    data_time = AverageMeter()
     losses = AverageMeter()
     top1 = AverageMeter()
     top5 = AverageMeter()
+    learned_module_list = []  # add all the LGC layers into the list
 
-    # Switch to evaluate mode
+    # Switch to train mode
+    model.train()
+    # Find all learned convs to prepare for group lasso loss
+    for m in model.modules():
+        if m.__str__().startswith('LearnedGroupConv'):
+            learned_module_list.append(m)
+
+    running_lr = None
+
+    beginTime = time.time()
+    for i, (input, target) in enumerate(train_loader):
+        progress = float(epoch * len(train_loader) + i) / (epochs * len(train_loader))
+        args.progress = progress
+
+        lr = adjust_learning_rate(optimizer, epoch, args, batch=i, nBatch=len(train_loader), method=args.lr_type)
+        if running_lr is None:
+            running_lr = lr
+
+        data_time.update(time.time() - beginTime)
+
+        # input Tensor CPU --> GPU
+        if torch.cuda.is_available():
+            input = input.cuda()
+            target = target.cuda()
+
+        # Tensor --> Variable --> model
+        inputVar = Variable(input, requires_grad=True)
+        targetVar = Variable(target)
+
+        # compute the result
+        output, _ = model(inputVar, progress)
+        loss = criterion(output, targetVar)
+
+        # Add group lasso loss to the basic loss value
+        if args.group_lasso_lambda > 0:
+            lasso_loss = 0
+            for m in learned_module_list:
+                lasso_loss = lasso_loss + m.lasso_loss
+            loss = loss + args.group_lasso_lambda * lasso_loss
+
+        total_loss += loss.item()
+
+        # Measure accuracy and record loss
+        prec1, prec5 = accuracy(output.data, target, topk=(1, 5))
+        losses.update(loss.data[0], input.size(0))
+        top1.update(prec1[0], input.size(0))
+        top5.update(prec5[0], input.size(0))
+
+        # Compute gradient and do SGD step
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+        batch_time.update(time.time() - beginTime)
+        end = time.time()
+
+        if i % args.print_freq == 0:
+            print('Epoch: [{0}][{1}/{2}]\t'
+                  'Time {batch_time.val:.3f}\t'  # ({batch_time.avg:.3f}) '
+                  'Data {data_time.val:.3f}\t'  # ({data_time.avg:.3f}) '
+                  'Loss {loss.val:.4f}\t'  # ({loss.avg:.4f}) '
+                  'Prec@1 {top1.val:.3f}\t'  # ({top1.avg:.3f}) '
+                  'Prec@5 {top5.val:.3f}\t'  # ({top5.avg:.3f})'
+                  'lr {lr: .4f}'.format(epoch, i, len(train_loader), batch_time=batch_time,
+                                        data_time=data_time, loss=losses, top1=top1, top5=top5, lr=lr))
+
+    return top1, top5, loss, lr, total_loss
+
+
+def val_epoch(val_loader, model):
+    losses = AverageMeter()
+    top1 = AverageMeter()
+    top5 = AverageMeter()
+    batch_time = AverageMeter()
+
     model.eval()
-
-    begin_time= time.time()
-
+    begin_time = time.time()
     for i, (input, target) in enumerate(val_loader):
         if torch.cuda.is_available():
             input = input.cuda()
@@ -232,7 +259,57 @@ def test(model, val_loader):
         criterion = nn.CrossEntropyLoss().cuda()
 
         # Compute output
-        output = model(input_var)
+        output, _ = model(input_var)
+        loss = criterion(output, target_var)
+
+        # Measure accuracy and record loss
+        prec1, prec5 = accuracy(output.data, target, topk=(1, 5))
+        losses.update(loss.data[0], input.size(0))
+        top1.update(prec1[0], input.size(0))
+        top5.update(prec5[0], input.size(0))
+
+        # Measure elapsed time
+        batch_time.update(time.time() - begin_time)
+        end_time = time.time()
+
+        if i % args.print_freq == 0:
+            print('Validation: [{0}/{1}]\t'
+                  'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
+                  'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
+                  'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'
+                  'Prec@5 {top5.val:.3f} ({top5.avg:.3f})'.format(i, len(val_loader), batch_time=batch_time,
+                                                                  loss=losses, top1=top1, top5=top5))
+    print(' * Prec@1 {top1.avg:.3f} Prec@5 {top5.avg:.3f}'.format(top1=top1, top5=top5))
+
+    return top1, top5, loss, losses
+
+
+def test(model, test_set):
+    batch_time = AverageMeter()
+    losses = AverageMeter()
+    top1 = AverageMeter()
+    top5 = AverageMeter()
+
+    test_loader = DataLoader(test_set, batch_size=args.batch_size, shuffle=False,
+                                              pin_memory=(torch.cuda.is_available()), num_workers=args.works)
+
+    # Switch to evaluate mode
+    model.eval()
+
+    begin_time = time.time()
+
+    for i, (input, target) in enumerate(test_loader):
+        if torch.cuda.is_available():
+            input = input.cuda()
+            target = target.cuda(async=True)
+
+        input_var = torch.autograd.Variable(input, volatile=True)
+        target_var = torch.autograd.Variable(target, volatile=True)
+
+        criterion = nn.CrossEntropyLoss().cuda()
+
+        # Compute output
+        output, featureMaps = model(input_var)
         loss = criterion(output, target_var)
 
         # Measure accuracy and record loss
@@ -250,11 +327,15 @@ def test(model, val_loader):
                   'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
                   'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
                   'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'
-                  'Prec@5 {top5.val:.3f} ({top5.avg:.3f})'.format(i, len(val_loader), batch_time=batch_time,
+                  'Prec@5 {top5.val:.3f} ({top5.avg:.3f})'.format(i, len(test_loader), batch_time=batch_time,
                                                                   loss=losses, top1=top1, top5=top5))
 
     print(' * Prec@1 {top1.avg:.3f} Prec@5 {top5.avg:.3f}'.format(top1=top1, top5=top5))
 
 
+
 if __name__ =='__main__':
+    """
+    the args parameters must be set in advance
+    """
     main()
