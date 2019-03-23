@@ -3,7 +3,9 @@
   <component name="ProjectModuleManager">
     <modules>
       <module fileurl="file://$PROJECT_DIR$/../CondenseNet/.idea/CondenseNet.iml" filepath="$PROJECT_DIR$/../CondenseNet/.idea/CondenseNet.iml" />
+      <module fileurl="file://$PROJECT_DIR$/../YOLO_tensorflow/.idea/YOLO_tensorflow.iml" filepath="$PROJECT_DIR$/../YOLO_tensorflow/.idea/YOLO_tensorflow.iml" />
       <module fileurl="file://$PROJECT_DIR$/../efficient_densenet_pytorch/.idea/efficient_densenet_pytorch.iml" filepath="$PROJECT_DIR$/../efficient_densenet_pytorch/.idea/efficient_densenet_pytorch.iml" />
+      <module fileurl="file://$PROJECT_DIR$/../plate_recognition/.idea/plate_recognition.iml" filepath="$PROJECT_DIR$/../plate_recognition/.idea/plate_recognition.iml" />
       <module fileurl="file://$PROJECT_DIR$/../pytorch-deeplab-xception/.idea/pytorch-deeplab-xception.iml" filepath="$PROJECT_DIR$/../pytorch-deeplab-xception/.idea/pytorch-deeplab-xception.iml" />
       <module fileurl="file://$PROJECT_DIR$/.idea/pytorch_classification.iml" filepath="$PROJECT_DIR$/.idea/pytorch_classification.iml" />
     </modules>

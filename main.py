@@ -1,4 +1,3 @@
-# import fire
 import os
 import sys
 import math
@@ -112,14 +111,13 @@ def main():
 
     elif args.mode == 'test':
         test_set = read_test_data(datadir=args.data_dir, data=args.data, mode='test')
-        test(model=model, )
+        test(model=model, test_set=test_set)
     else:
         raise NotImplementedError
 
 
 def train(startepoch, epochs, model, train_set, val_set, resume):
     train_loader = DataLoader(train_set, batch_size=args.batch_size, shuffle=True, num_workers=args.workers, pin_memory=True)
-
     val_loader = DataLoader(val_set, batch_size=args.batch_size, shuffle=False, num_workers=args.workers, pin_memory=True)
 
     # set the loss function and optimizer(SGD)
@@ -127,17 +125,19 @@ def train(startepoch, epochs, model, train_set, val_set, resume):
     optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay, nesterov=True)
 
     # recover the parameters from checkpoint files
-    if resume:
+    if resume == True:
         checkpoint = load_checkpoint(args)
         if checkpoint is not None:
             start_epoch = checkpoint['epoch'] + 1
             best_prec1 = checkpoint['best_prec1']
             model.load_state_dict(checkpoint['state_dict'])
             optimizer.load_state_dict(checkpoint['optimizer'])
-    else:
+    elif resume == False:
         start_epoch = startepoch
         Writer = SummaryWriter(log_dir=args.log_dir)
 
+    else:
+        raise NotImplementedError
     # set a variable for tensorboard
     training_total_loss = 0
 
@@ -331,7 +331,6 @@ def test(model, test_set):
                                                                   loss=losses, top1=top1, top5=top5))
 
     print(' * Prec@1 {top1.avg:.3f} Prec@5 {top5.avg:.3f}'.format(top1=top1, top5=top5))
-
 
 
 if __name__ =='__main__':

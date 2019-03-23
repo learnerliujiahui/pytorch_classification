@@ -9,5 +9,8 @@
     <orderEntry type="module" module-name="CondenseNet" />
     <orderEntry type="module" module-name="pytorch-deeplab-xception" />
     <orderEntry type="module" module-name="efficient_densenet_pytorch" />
+    <orderEntry type="module" module-name="CondenseNet" />
+    <orderEntry type="module" module-name="YOLO_tensorflow" />
+    <orderEntry type="module" module-name="plate_recognition" />
   </component>
 </module>
