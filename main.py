@@ -4,6 +4,7 @@ import math
 sys.path.append(r"/home/liujiahui/PycharmProjects/efficient_densenet_pytorch/models")
 import argparse
 import time
+import pickle
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -70,7 +71,6 @@ if args.condense_factor is None:
 
 
 def main():
-
     # set model
     model = getattr(models, args.model)(args)
 
@@ -125,14 +125,14 @@ def train(startepoch, epochs, model, train_set, val_set, resume):
     optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay, nesterov=True)
 
     # recover the parameters from checkpoint files
-    if resume == True:
+    if resume:
         checkpoint = load_checkpoint(args)
         if checkpoint is not None:
             start_epoch = checkpoint['epoch'] + 1
             best_prec1 = checkpoint['best_prec1']
             model.load_state_dict(checkpoint['state_dict'])
             optimizer.load_state_dict(checkpoint['optimizer'])
-    elif resume == False:
+    elif not resume:
         start_epoch = startepoch
         Writer = SummaryWriter(log_dir=args.log_dir)
 
@@ -141,6 +141,7 @@ def train(startepoch, epochs, model, train_set, val_set, resume):
     # set a variable for tensorboard
     training_total_loss = 0
 
+    best_error = 100  # set the flag for beat parameters
     # starting training
     for epoch in range(start_epoch, epochs):
         # start training
@@ -161,6 +162,12 @@ def train(startepoch, epochs, model, train_set, val_set, resume):
         Writer.add_scalar("validation total loss", losses, epoch)
         Writer.add_scalar("validation top-1 error", val_error1, epoch)
         Writer.add_scalar("validation top-5 error", val_error5, epoch)
+
+        is_best = val_error1 < best_error
+        best_error = min(val_error1, best_error)
+        if is_best:
+            print("New best error:%.4f" % val_error1)
+            torch.save(model.state_dict(), os.path.join(args.para_dir, 'model.dat'))
 
 
 def train_eopch(train_loader, model, optimizer, criterion, epoch, epochs, total_loss):
@@ -215,7 +222,7 @@ def train_eopch(train_loader, model, optimizer, criterion, epoch, epochs, total_
 
         # Measure accuracy and record loss
         prec1, prec5 = accuracy(output.data, target, topk=(1, 5))
-        losses.update(loss.data[0], input.size(0))
+        losses.update(loss.item(), input.size(0))
         top1.update(prec1[0], input.size(0))
         top5.update(prec5[0], input.size(0))
 
@@ -237,7 +244,7 @@ def train_eopch(train_loader, model, optimizer, criterion, epoch, epochs, total_
                   'lr {lr: .4f}'.format(epoch, i, len(train_loader), batch_time=batch_time,
                                         data_time=data_time, loss=losses, top1=top1, top5=top5, lr=lr))
 
-    return top1, top5, loss, lr, total_loss
+    return top1.avg, top5.avg, losses.avg, lr, total_loss
 
 
 def val_epoch(val_loader, model):
@@ -281,7 +288,7 @@ def val_epoch(val_loader, model):
                                                                   loss=losses, top1=top1, top5=top5))
     print(' * Prec@1 {top1.avg:.3f} Prec@5 {top5.avg:.3f}'.format(top1=top1, top5=top5))
 
-    return top1, top5, loss, losses
+    return top1.avg, top5.avg, loss, losses
 
 
 def test(model, test_set):
